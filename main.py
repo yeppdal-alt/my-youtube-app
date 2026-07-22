@@ -1,6 +1,8 @@
-import re  # 정규식으로 유튜브 링크에서 영상 ID를 뽑아내기 위해 사용
+import re  # 정규식으로 유튜브 링크 파싱 + 댓글에서 단어 뽑아내기에 사용
+from collections import Counter  # 단어별 등장 횟수를 세기 위해 사용
 
 import pandas as pd  # 댓글 목록을 표로 예쁘게 보여주기 위해 사용
+import plotly.express as px  # 단어 빈도 막대그래프를 그리기 위해 사용
 import requests  # YouTube Data API에 HTTP 요청을 보내기 위해 사용
 import streamlit as st
 
@@ -113,6 +115,32 @@ def fetch_comments(video_id: str, api_key: str, max_results: int = 100):
 
 
 # ------------------------------------------------------------------
+# 함수 3: 댓글 전체에서 자주 나온 단어 상위 N개 세기
+# ------------------------------------------------------------------
+def count_top_words(comments: list, top_n: int = 20):
+    """
+    댓글들을 전부 이어붙인 뒤, 한글/영문/숫자 덩어리를 '단어'로 뽑아 개수를 센다.
+    - 한 글자짜리 단어는 제외한다 (예: "이", "a" 등)
+    - 영문은 대소문자를 구분하지 않도록 소문자로 통일한다
+    - 등장 횟수가 많은 순으로 top_n개를 돌려준다 (word, count) 형태의 리스트
+    """
+    all_text = " ".join(c["댓글"] for c in comments)
+
+    # 한글 완성형, 영문자, 숫자로만 이루어진 덩어리를 단어로 취급한다.
+    # (이모지, 문장부호, 공백 등은 자동으로 걸러진다)
+    raw_words = re.findall(r"[A-Za-z0-9]+|[가-힣]+", all_text)
+
+    words = []
+    for w in raw_words:
+        w = w.lower()  # 영문 대소문자 통일 (한글은 영향 없음)
+        if len(w) >= 2:  # 한 글자짜리 단어는 제외
+            words.append(w)
+
+    counter = Counter(words)
+    return counter.most_common(top_n)
+
+
+# ------------------------------------------------------------------
 # 메인 로직: 버튼을 누르면 댓글을 가져와서 화면에 보여준다
 # ------------------------------------------------------------------
 if st.button("댓글 가져오기", type="primary"):
@@ -159,3 +187,34 @@ if st.button("댓글 가져오기", type="primary"):
                 # 댓글 목록을 표로 표시 (좋아요 많은 순)
                 df = pd.DataFrame(comments)
                 st.dataframe(df, use_container_width=True, hide_index=True)
+
+                # ------------------------------------------------------
+                # 자주 나온 단어 TOP 20 (한 글자짜리 단어는 제외)
+                # ------------------------------------------------------
+                st.subheader("📊 자주 나온 단어 TOP 20")
+
+                top_words = count_top_words(comments, top_n=20)
+
+                if not top_words:
+                    st.info("단어를 분석할 수 있는 댓글 내용이 부족해요.")
+                else:
+                    word_df = pd.DataFrame(top_words, columns=["단어", "횟수"])
+
+                    # 가로 막대그래프는 데이터프레임의 첫 행이 아래쪽에 그려진다.
+                    # 그래서 '많이 나온 단어가 위로' 오게 하려면 오름차순으로 정렬해야 한다.
+                    word_df = word_df.sort_values("횟수", ascending=True)
+
+                    fig = px.bar(
+                        word_df,
+                        x="횟수",
+                        y="단어",
+                        orientation="h",
+                        text="횟수",
+                        title="자주 나온 단어 TOP 20",
+                    )
+                    fig.update_layout(
+                        xaxis_title="등장 횟수",
+                        yaxis_title="단어",
+                        height=600,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)

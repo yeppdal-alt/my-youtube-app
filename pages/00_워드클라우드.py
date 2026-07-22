@@ -1,7 +1,9 @@
 import os  # 폰트 파일이 이미 다운로드되어 있는지 확인하기 위해 사용
+import random  # 워드클라우드 단어마다 다른 '붉은 톤'을 무작위로 고르기 위해 사용
 import re  # 정규식으로 유튜브 링크 파싱 + 댓글에서 단어 뽑아내기에 사용
 from collections import Counter  # 단어별 등장 횟수를 세기 위해 사용
 
+import numpy as np  # 하트 모양 마스크(도장)를 수학 공식으로 그리기 위해 사용
 import pandas as pd  # 댓글 목록을 표로 예쁘게 보여주기 위해 사용
 import plotly.express as px  # 단어 빈도 막대그래프를 그리기 위해 사용
 import requests  # YouTube Data API에 HTTP 요청을 보내기 위해 사용
@@ -14,6 +16,9 @@ FONT_URL = (
     "NanumGothic-Regular.ttf"
 )
 FONT_PATH = "NanumGothic-Regular.ttf"
+
+# 하트 모양 마스크의 한 변 크기(픽셀). 값이 클수록 해상도가 높아진다.
+HEART_MASK_SIZE = 900
 
 # ------------------------------------------------------------------
 # 기본 설정
@@ -178,19 +183,63 @@ def download_font():
 
 
 # ------------------------------------------------------------------
-# 함수 5: 워드클라우드 이미지 만들기 (matplotlib 없이 이미지 객체만 반환)
+# 함수 5-1: 하트 모양 마스크(도장) 만들기
+# ------------------------------------------------------------------
+def make_heart_mask(size: int = HEART_MASK_SIZE):
+    """
+    하트 커브 수학 공식 (x²+y²-1)³ - x²y³ ≤ 0 을 이용해
+    하트 모양 마스크 배열을 만든다.
+    - wordcloud 라이브러리 규칙: 마스크 값이 흰색(255)인 곳에는 글자를 그리지 않고,
+      그 외(0, 검정)인 곳에만 글자를 채운다.
+    - 이미지 좌표는 위에서 아래로 갈수록 y가 커지므로, 하트의 뾰족한 부분이
+      아래로 향하도록 y 값을 뒤집어준다.
+    """
+    x, y = np.meshgrid(
+        np.linspace(-1.5, 1.5, size),
+        np.linspace(-1.5, 1.5, size),
+    )
+    y = -y
+
+    heart_curve = (x**2 + y**2 - 1) ** 3 - (x**2) * (y**3)
+    mask = np.where(heart_curve <= 0, 0, 255).astype(np.uint8)
+    return mask
+
+
+# ------------------------------------------------------------------
+# 함수 5-2: 단어마다 무작위 '붉은 톤' 색을 골라주는 함수
+# ------------------------------------------------------------------
+def red_tone_color_func(word=None, font_size=None, position=None, orientation=None, random_state=None, **kwargs):
+    """
+    색상(hue)은 빨강(0)으로 고정하고, 채도/명도만 무작위로 바꿔서
+    진한 빨강 ~ 밝은 빨강까지 다양한 '붉은 톤'을 만든다.
+    """
+    saturation = random.randint(65, 100)  # 채도: 선명함 정도
+    lightness = random.randint(30, 55)  # 명도: 밝기 정도 (낮을수록 진한 빨강)
+    return f"hsl(0, {saturation}%, {lightness}%)"
+
+
+# ------------------------------------------------------------------
+# 함수 5-3: 워드클라우드 이미지 만들기 (matplotlib 없이 이미지 객체만 반환)
 # ------------------------------------------------------------------
 def generate_wordcloud_image(word_counter: Counter, font_path: str):
     """
-    단어별 등장 횟수(Counter)를 받아 흰색 배경의 워드클라우드 이미지를 만든다.
+    단어별 등장 횟수(Counter)를 받아 하트 모양 + 붉은 톤 워드클라우드를 만든다.
     wordcloud 라이브러리의 to_image()는 PIL 이미지 객체를 돌려주므로,
     st.image()로 바로 화면에 띄울 수 있다 (matplotlib 불필요).
     """
+    mask = make_heart_mask()
+
     wc = WordCloud(
         font_path=font_path,
         background_color="white",
-        width=800,
-        height=400,
+        mask=mask,  # 하트 모양 안에만 글자를 채운다
+        color_func=red_tone_color_func,  # 글자 색을 붉은 톤으로 통일
+        contour_width=0,
+        width=mask.shape[1],
+        height=mask.shape[0],
+        scale=2,  # 이미지를 2배 크기로 렌더링해서 해상도를 높인다
+        min_font_size=4,
+        random_state=42,
     )
     wc.generate_from_frequencies(word_counter)
     return wc.to_image()
@@ -282,7 +331,7 @@ if st.button("댓글 가져오기", type="primary"):
                 # ------------------------------------------------------
                 # 워드클라우드 (한 글자짜리 단어는 제외, 흰색 배경)
                 # ------------------------------------------------------
-                st.subheader("☁️ 댓글 워드클라우드")
+                st.subheader("❤️ 댓글 하트 워드클라우드")
 
                 if not word_counter:
                     st.info("워드클라우드를 만들 수 있는 댓글 내용이 부족해요.")
